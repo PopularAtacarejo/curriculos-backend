@@ -51,18 +51,6 @@ async function getFileSha(path) {
   }
 }
 
-async function uploadFileToGitHub(filePath, githubPath, message) {
-  const content = fs.readFileSync(filePath, { encoding: 'base64' });
-  const sha = await getFileSha(githubPath);
-
-  await githubApi.put(`/repos/${GITHUB_USER}/${REPO_NAME}/contents/${githubPath}`, {
-    message,
-    content,
-    branch: BRANCH,
-    ...(sha && { sha })
-  });
-}
-
 app.post('/api/enviar', upload.single('arquivo'), async (req, res) => {
   try {
     const dados = req.body;
@@ -70,8 +58,6 @@ app.post('/api/enviar', upload.single('arquivo'), async (req, res) => {
     const dataEnvio = new Date().toISOString();
     const nomeArquivo = `${Date.now()}-${arquivo.originalname}`;
     const githubFilePath = `${CURRICULO_DIR}/${nomeArquivo}`;
-
-    await uploadFileToGitHub(arquivo.path, githubFilePath, `Adiciona currículo de ${dados.nome}`);
 
     const jsonPath = 'dados.json';
     let registros = [];
@@ -84,16 +70,45 @@ app.post('/api/enviar', upload.single('arquivo'), async (req, res) => {
       registros = [];
     }
 
+    const agora = new Date();
+    const registrosFiltrados = [];
+
+    for (const reg of registros) {
+      const dataRegistro = new Date(reg.data);
+      const diffMeses = (agora - dataRegistro) / (1000 * 60 * 60 * 24 * 30);
+
+      const ehDuplicado = reg.cpf === dados.cpf && reg.vaga === dados.vaga;
+      const ehAntigo = diffMeses >= 2;
+
+      if (ehDuplicado || ehAntigo) {
+        const caminhoGit = reg.arquivo.split(`/${BRANCH}/`)[1];
+        const sha = await getFileSha(caminhoGit);
+        if (sha) {
+          await githubApi.delete(`/repos/${GITHUB_USER}/${REPO_NAME}/contents/${caminhoGit}`, {
+            data: {
+              message: `Remove currículo duplicado ou antigo de ${reg.nome || 'desconhecido'}`,
+              sha,
+              branch: BRANCH
+            }
+          });
+        }
+      } else {
+        registrosFiltrados.push(reg);
+      }
+    }
+
+    await uploadFileToGitHub(arquivo.path, githubFilePath, `Adiciona currículo de ${dados.nome}`);
+
     const novoRegistro = {
       ...dados,
       arquivo: `https://raw.githubusercontent.com/${GITHUB_USER}/${REPO_NAME}/${BRANCH}/${githubFilePath}`,
       data: dataEnvio
     };
 
-    registros.push(novoRegistro);
+    registrosFiltrados.push(novoRegistro);
 
     const jsonLocalPath = './temp/dados.json';
-    fs.writeFileSync(jsonLocalPath, JSON.stringify(registros, null, 2));
+    fs.writeFileSync(jsonLocalPath, JSON.stringify(registrosFiltrados, null, 2));
     await uploadFileToGitHub(jsonLocalPath, jsonPath, `Atualiza dados.json com currículo de ${dados.nome}`);
 
     fs.unlinkSync(arquivo.path);
@@ -104,6 +119,18 @@ app.post('/api/enviar', upload.single('arquivo'), async (req, res) => {
     res.status(500).send({ erro: 'Erro ao enviar currículo.' });
   }
 });
+
+async function uploadFileToGitHub(filePath, githubPath, message) {
+  const content = fs.readFileSync(filePath, { encoding: 'base64' });
+  const sha = await getFileSha(githubPath);
+
+  await githubApi.put(`/repos/${GITHUB_USER}/${REPO_NAME}/contents/${githubPath}`, {
+    message,
+    content,
+    branch: BRANCH,
+    ...(sha && { sha })
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);

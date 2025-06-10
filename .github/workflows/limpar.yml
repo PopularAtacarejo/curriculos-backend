@@ -1,0 +1,31 @@
+name: Limpeza de Currículos
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # Todos os dias às 09:00 UTC
+  workflow_dispatch:
+
+jobs:
+  limpar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v3
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Instalar dependências
+        run: npm install
+
+      - name: Executar script de limpeza
+        env:
+          GITHUB_USER: ${{ secrets.GITHUB_USER }}
+          REPO_NAME: ${{ secrets.REPO_NAME }}
+          BRANCH: ${{ secrets.BRANCH }}
+          TOKEN: ${{ secrets.TOKEN }}
+          CURRICULO_DIR: ${{ secrets.CURRICULO_DIR }}
+        run: node limpar.js
